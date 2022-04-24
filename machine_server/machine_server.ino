@@ -9,7 +9,7 @@
 /**     Define Pins     **/
 #define CUBE_HOLDER_SERVO D6
 #define TOP_COVER_SERVO D7
-
+#define BUILTIN_LED D4
 
 /**     Constants    **/
 const char* AP_SSID = "Dark Solver";  
@@ -22,26 +22,6 @@ const IPAddress SUBNET(255, 255, 255, 0);
 
 
 /**     Global Variables    **/
-// Top Servo (top cover) Angles
-int closeAngle = 180;
-int flipAngle = 100;
-int openAngle = 138;
-
-// Top Servo (top cover) Times
-int closeTime = 100;
-int flipTime = 100;
-int openTime = 100;
-
-// Bottom Servo (cube holder) Angles
-int clockwiseAngle = 15;
-int homeAngle = 92;
-int counterClockwiseAngle = 160;
-
-// Bottom Servo (cube holder) Angles
-int clockwiseTime = 100;
-int homeTime = 100;
-int counterClockwiseTime = 100;
-
 String topCoverState = "open";
 String cubeHolderState = "home";
 
@@ -52,7 +32,7 @@ Servo cubeHolder, topCover;
 // A server object listen to port 80
 ESP8266WebServer server(80); 
 
-DynamicJsonDocument settings(3*JSON_OBJECT_SIZE(2) + 2*JSON_OBJECT_SIZE(4) + JSON_OBJECT_SIZE(6) + JSON_OBJECT_SIZE(3));
+DynamicJsonDocument settings(3*JSON_OBJECT_SIZE(2) + 2*JSON_OBJECT_SIZE(4) + 3*JSON_OBJECT_SIZE(6) + JSON_OBJECT_SIZE(3));
 
 
 
@@ -67,6 +47,10 @@ void setup() {
   delay(200);
   topCover.attach(TOP_COVER_SERVO, 500, 2740);
   topCover.write(180);
+
+  /**   Configure the builtin led   **/
+  pinMode(BUILTIN_LED, OUTPUT); 
+  digitalWrite(BUILTIN_LED, !LOW);
   
   /**   Configure Serial Communication    **/
   Serial.begin(115200);
@@ -74,8 +58,15 @@ void setup() {
   /**   Set the server routes   **/
   server.on("/checkConnection", handleCheckConnection);
   server.on("/init", handleInit);
+  server.on("/disconnect", handleDisconnect);
   server.on("/getSettings", handleGetSettings);
   server.on("/updateSettings", handleUpdateSettings);
+  server.on("/flipTopCover", flipTopCover);
+  server.on("/closeTopCover", closeTopCover);
+  server.on("/openTopCover", openTopCover);
+  server.on("/rotateClockwise", rotateClockwise);
+  server.on("/rotateCounterClockwise", rotateCounterClockwise);
+  server.on("/homeCubeHolder", homeCubeHolder);
   server.onNotFound(handleNotFound);
 
   /**   Establish the server    **/
@@ -133,8 +124,24 @@ void handleInit () {
   // Initalize servos position
   homeCubeHolder();
   openTopCover();
+
+  // Turn on the builtin led
+  digitalWrite(BUILTIN_LED, !HIGH); 
   
   server.send(200, "text/plain", "Initialized");
+}
+
+
+/*
+ * Turn off the builtin led when gui hit "/disconnect" endpoint
+ */
+void handleDisconnect() {
+  // Turn off the builtin led
+  digitalWrite(BUILTIN_LED, !LOW); 
+
+  closeTopCover();
+  
+  server.send(200, "text/plain", "Disconnected");
 }
 
 
@@ -156,8 +163,9 @@ void handleGetSettings() {
 void handleUpdateSettings() {
   // Parse post request body to settings json
   deserializeJson(settings, server.arg("plain"));
+  Serial.println(server.arg("plain"));
 
-   server.send(200, "text/plain", "Updated");
+  server.send(200, "text/plain", "Updated");
 }
 
 
@@ -165,8 +173,8 @@ void handleUpdateSettings() {
  * Flips the complete cube ("F") by "moving" the Front face to Bottom face using the top cover
  */
 void flipTopCover() {
-  topCover.write(flipAngle);
-  delay(flipTime);
+  topCover.write(settings["TOP_COVER"]["ANGLE"]["FLIP"]);
+  delay(settings["TOP_COVER"]["TIME"]["FLIP_TO_CLOSE"]);
 }
 
 
@@ -174,8 +182,8 @@ void flipTopCover() {
  * Opens the top cover to free the complete cube
  */
 void openTopCover() {
-  topCover.write(openAngle);
-  delay(openTime);
+  topCover.write(settings["TOP_COVER"]["ANGLE"]["OPEN"]);
+  delay(settings["TOP_COVER"]["TIME"]["FLIP_OPEN"]);
 }
 
 
@@ -183,8 +191,8 @@ void openTopCover() {
  * Closes the top cover to hold the complete cube
  */
 void closeTopCover() {
-  topCover.write(closeAngle);
-  delay(closeTime);
+  topCover.write(settings["TOP_COVER"]["ANGLE"]["CLOSE"]);
+  delay(settings["TOP_COVER"]["TIME"]["FLIP_OPEN"]);
 }
 
 
@@ -192,8 +200,10 @@ void closeTopCover() {
  * Rotates the complete cube clockwise
  */
 void rotateClockwise() {
-  cubeHolder.write(clockwiseAngle);
-  delay(clockwiseTime);
+  String ang = settings["CUBE_HOLDER"];
+  Serial.println(ang);
+  cubeHolder.write(settings["CUBE_HOLDER"]["ANGLE"]["CW"]);
+  delay(settings["CUBE_HOLDER"]["TIME"]["ROTATE"]);
 }
 
 
@@ -201,8 +211,8 @@ void rotateClockwise() {
  * Rotates the complete cube counter clockwise
  */
 void rotateCounterClockwise() {
-  cubeHolder.write(counterClockwiseAngle);
-  delay(counterClockwiseTime);
+  cubeHolder.write(settings["CUBE_HOLDER"]["ANGLE"]["CCW"]);
+  delay(settings["CUBE_HOLDER"]["TIME"]["ROTATE"]);
 }
 
 
@@ -210,6 +220,6 @@ void rotateCounterClockwise() {
  * Returns the complete cube to home position
  */
 void homeCubeHolder() {
-  cubeHolder.write(homeAngle);
-  delay(homeTime);
+  cubeHolder.write(settings["CUBE_HOLDER"]["ANGLE"]["HOME"]);
+  delay(settings["CUBE_HOLDER"]["TIME"]["RELEASE"]);
 }

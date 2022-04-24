@@ -25,9 +25,6 @@
 # ################################## Imports  ##########################################################################
 
 # custom libraries
-from tabnanny import check
-
-from numpy import isposinf
 import colors_recognition as cam        # recognize cube status via a webcam (by Andrea Favero)
 import Cubotino_moves as cm          # translate a cube solution into CUBOTino robot moves (by Andrea Favero)
 import twophase.solver as sv                  # Kociemba solver library (by Hergbert Kociemba)
@@ -1019,7 +1016,7 @@ def gui_sliders_update(intent):
         or updates the sliders based on the global variables."""
     
     global robot_settings
-    
+
     if intent == 'read_sliders':             # case the intention is to get sliders values to update the global variables
         robot_settings["TOP_COVER"]["ANGLE"]["FLIP"] = s_top_srv_flip.get()
         robot_settings["TOP_COVER"]["ANGLE"]["OPEN"] = s_top_srv_open.get()
@@ -1122,9 +1119,7 @@ def log_data():
 
 
 
-# ################################### serial comunication related functions #############################################
-""" the serial communication part and tkinter gui approach is largely based on tutorial
-https://www.youtube.com/watch?v=x_5VbOOskw0 """
+# ################################### IP protocol comunication related functions #############################################
 
 
 def connect_check(args):
@@ -1134,10 +1129,6 @@ def connect_check(args):
         b_connect["state"] = "disable"   # Connect button is disabled
     else:                                # case a serial port selected
         b_connect["state"] = "active"    # Connect button is activated
-
-
-
-
 
 
 def update_ips():
@@ -1175,7 +1166,7 @@ def check_ip_range(start, end):
 
     for octet in range(start, end):
         try:
-            r = requests.post(f"http://192.168.1.{octet}/checkConnection", timeout=0.07)
+            r = requests.post(f"http://192.168.1.{octet}/checkConnection", timeout=0.1)
 
             if r.status_code == 200:
                 ips.append(f"192.168.1.{octet}")
@@ -1183,21 +1174,20 @@ def check_ip_range(start, end):
             pass
 
 
-
 def connection():
     """Function to open / close the serial communication.
     When a serial is opened, a thread is initiated for the communication."""
     
-    global ser, serialData, gui_prog_bar, robot_working, cube_solving_string
+    global serialData, gui_prog_bar, robot_working, cube_solving_string
     
+    ip = clicked_ip.get()                           # IP is retrieved from the selection made on drop down menu
+
     if "Disconnect" in b_connect["text"]:           # case the conection button shows Disconnect
         stop_robot()                                # robot is requested to stop
         robot_working=False                         # boolean tracking the robot working is set to False
         serialData = False                          # boolean enabling serial comm data analysis is set False
         try: 
-            print("closing COM")                    # feedback print to the terminal
-            ser.write(("[led_off]\n").encode())     # ESP32 blue led is set off
-            ser.close()                             # serial port (at PC side) is closed
+            requests.post(f"http://{ip}/disconnect")# NodeMCU blue led is set off
         except:
             pass
         b_connect["text"] = "Connect"               # conection button label is changed to Connect
@@ -1215,29 +1205,16 @@ def connection():
         gui_robot_btn_update()                      # updates the cube related buttons status
         b_connect["text"] = "Disconnect"            # conection button label is changed to Disconnect
         b_refresh["state"] = "disable"              # refresch com button is disables
-        b_drop_ip["state"] = "disable"             # drop down menu for ports is disabled
-        port = clicked_ip.get()                    # serial port is retrieved from the selection made on drop down menu
-        print(f"selected ip: {port}")             # feedback print to the terminal
+        b_drop_ip["state"] = "disable"              # drop down menu for ports is disabled
+        print(f"selected ip: {ip}")                 # feedback print to the terminal
         
-        try:                                        # serial port opening
-            ser = serial.Serial(port,
-                                baudrate=115200,
-                                parity=serial.PARITY_NONE,
-                                stopbits=serial.STOPBITS_ONE,
-                                bytesize=serial.EIGHTBITS,
-                                timeout=None,
-                                xonxoff=False,
-                                rtscts=False,
-                                dsrdtr=False,     
-                               )
-#             print(ser)
-            time.sleep(1)
+        text_info = "Check if your PC connected to the NodeMCU network"
 
+        try:                                        
+            requests.post(f"http://{ip}/checkConnection", timeout=1)            
         except:
-            text_info="check if ESP32 is connected to the IDE"        # text of possible connection fail reason
-            print(text_info)                                          # print text of possible connection fail reason
             if (text_info not in gui_text_window.get(1.0, tk.END)):   # case the text_info is not displayed at GUI
-                show_text("\nCheck if ESP32 is connected to the IDE\n") # text_info is displayed at GUI
+                show_text(f"\n{text_info}\n") # text_info is displayed at GUI
                 
             serialData = False                               # boolean enabling serial comm data analysis is set True
             b_connect["text"] = "Connect"                    # conection button label is changed to Connect
@@ -1247,25 +1224,20 @@ def connection():
             
             return
 
-        if ser.isOpen():                                          # case the serial is succesfully opened
-            text_info="Check if ESP32 is connected to the IDE"    # text of possible connection fail reason                                       # print text of possible connection fail reason
-            if (text_info in gui_text_window.get(1.0, tk.END)):   # case the text_info is displayed at GUI
-                gui_text_window.delete(1.0, tk.END)               # clears GUI text window
-                
-            try:
-                ser.write(("[led_on]\n").encode())   # ESP32 blue led is set on (fix) 
-            except:                                  # case the first write attempt goes wrong
-                print("could not write on ser")      # feedback print to the terminal
+
+        if (text_info in gui_text_window.get(1.0, tk.END)):   # case the text_info is displayed at GUI
+            gui_text_window.delete(1.0, tk.END)               # clears GUI text window
+            
+        try:
+            requests.post(f"http://{ip}/init", json=robot_settings, timeout=1)
+        except:                                               # case the first write attempt goes wrong
+            print("could not initialize the robot")           # feedback print to the terminal
 
         b_settings["state"] = "active"               # settings button is activated
             
-        t1 = threading.Thread(target=readSerial)     # a thread is associated to the readSerial function
-        t1.deamon = True                             # thread is set as deamon (runs in background with low priority)
-        t1.start()                                   # thread is started
-
-
-
-
+        # t1 = threading.Thread(target=readSerial)     # a thread is associated to the readSerial function
+        # t1.deamon = True                             # thread is set as deamon (runs in background with low priority)
+        # t1.start()                                   # thread is started
 
 
 def readSerial():
@@ -1363,20 +1335,14 @@ def readSerial():
                 break                                         # while loop is interrupted
 
 
-
-
-
-
 def close_window():
     """Function taking care to properly close things when the GUI is closed."""
     
-    global root, serialData, ser
+    global root, serialData
     
     try:
-        if ser.isOpen():                           # case the serial port (at PC) is open
-            print("closing COM")                   # feedback is printed to the terminal
-            ser.write(("[led_off]\n").encode())    # ESP32 blue led is switched off
-            ser.close()                            # serial port (at PC) is closed
+        if clicked_ip.get() != "-":
+            requests.post(f"http://{clicked_ip.get()}/disconnect", timeout=1)# NodeMCU blue led is set off                        # serial port (at PC) is closed
     except:
         pass
     serialData = False                             # boolean tracking serial comm conditions is set False
@@ -1407,7 +1373,7 @@ def servo_extra_home(val):
 def servo_rotate_time(val):
     robot_settings["CUBE_HOLDER"]["TIME"]["ROTATE"] = int(val)   # time needed to the bottom servo to rotate about 90deg
 
-def servo_rotate_time(val):
+def servo_release_time(val):
     robot_settings["CUBE_HOLDER"]["TIME"]["RELEASE"] = int(val)      # time to rotate slightly back, to release tensions
 
 def servo_spin_time(val):
@@ -1444,37 +1410,37 @@ def open_close_time(val):
 # ######################## functions to test the servos positions  #####################################################
 def flip_cube():
     try:
-        ser.write(("[test(flip)]\n").encode()) # send the flip_test request to the robot
+        requests.post(f"http://{clicked_ip.get()}/flipTopCover", timeout=1) # send the flip_test request to the robot
     except:
         pass
     
 def close_top_cover():
     try:
-        ser.write(("[test(close)]\n").encode()) # send the close_cover settings request to the robot
+        requests.post(f"http://{clicked_ip.get()}/closeTopCover", timeout=1)  # send the close_cover settings request to the robot
     except:
         pass
 
 def open_top_cover():
     try:
-        ser.write(("[test(open)]\n").encode()) # send the open_cover settings request to the robot
+        requests.post(f"http://{clicked_ip.get()}/openTopCover", timeout=1) # send the open_cover settings request to the robot
     except:
         pass
 
 def ccw():
     try:
-        ser.write(("[test(ccw)]\n").encode()) # send the spin/rotate to CCW request to the robot
+        requests.post(f"http://{clicked_ip.get()}/rotateCounterClockwise", timeout=1)  # send the spin/rotate to CCW request to the robot
     except:
         pass
     
 def home():
     try:
-        ser.write(("[test(home)]\n").encode()) # send the spin/rotate to HOME request to the robot
+        requests.post(f"http://{clicked_ip.get()}/homeCubeHolder", timeout=1)  # send the spin/rotate to HOME request to the robot
     except:
         pass
 
 def cw():
     try:
-        ser.write(("[test(cw)]\n").encode()) # send the spin/rotate to CW request to the robot
+        requests.post(f"http://{clicked_ip.get()}/rotateClockwise", timeout=1)  # send the spin/rotate to CW request to the robot
     except:
         pass
 
@@ -1487,6 +1453,7 @@ def cw():
 
 def save_robot_settings():
     """Function to save the servos settings to the json file."""
+    global robot_settings
     
     try:  
         with open(ROBOT_SETTINGS_FILE, 'w') as f:
@@ -1504,9 +1471,14 @@ def save_robot_settings():
 
 def get_current_servo_settings():
     """Request robot to send the current servos settings."""
-        
+    
+    global robot_settings
+
     try:
-        ser.write(("[current_settings]\n").encode())      # send the request to the robot for current servos settings
+        response = requests.post(f"http://{clicked_ip.get()}/getSettings", timeout=1)       # send the request to the robot for current servos settings
+        robot_settings = response.json()
+
+        gui_sliders_update('update_sliders')
     except:
         pass
 
@@ -1520,12 +1492,10 @@ def send_new_servo_settings():
     
     global robot_settings
     
-    gui_sliders_update('read_sliders')                       # sliders positions are read                    
-    data=str(robot_settings)                                 # tuple with servos settings is changed in string
-    data=data.replace(" ","")                                # eventual empty spaces are removed from the data string
-    print(f'\nservos settings sent to the robot: {data}')    # feedback is print to the terminal, as tuning reference
+    gui_sliders_update('read_sliders')                       # sliders positions are read
+                        
     try:
-        ser.write(("[new_settings"+data+"]\n").encode())     # send the new servos settings to the robot
+        requests.post(f"http://{clicked_ip.get()}/updateSettings", json=robot_settings, timeout=1)     # send the new servos settings to the robot
     except:
         pass
 
@@ -1728,19 +1698,19 @@ b_back.grid(row=9, column=4, sticky="w", padx=20, pady=20)
 
 
 #### getting and sending settings from/to the robot ####
-b_get_settings = tk.Button(settingWindow, text="Get current CUBOTino settings", height=1, width=26,
+b_get_settings = tk.Button(settingWindow, text="Get current Dark Snake settings", height=1, width=26,
                            state="active", command= get_current_servo_settings)
 b_get_settings.configure(font=("Arial", "11"))
 b_get_settings.grid(row=0, column=0, sticky="w", padx=20, pady=10)
 
 
-b_send_settings = tk.Button(settingWindow, text="Send new settings to CUBOTino", height=1, width=26,
+b_send_settings = tk.Button(settingWindow, text="Send new settings to Dark Snake", height=1, width=26,
                            state="active", command= send_new_servo_settings)
 b_send_settings.configure(font=("Arial", "11"))
 b_send_settings.grid(row=0, column=1, sticky="w", padx=20, pady=10)
 
 
-b_get_AF_settings = tk.Button(settingWindow, text="Save Robot Settings", height=1, width=15,
+b_get_AF_settings = tk.Button(settingWindow, text="Save Dark Snake Settings", height=1, width=28,
                            state="active", command=save_robot_settings)
 b_get_AF_settings.configure(font=("Arial", "11"))
 b_get_AF_settings.grid(row=0, column=4, sticky="w", padx=20, pady=10)
@@ -1752,25 +1722,25 @@ top_srv_label = tk.LabelFrame(settingWindow, text="Top cover - servo settings",
                                    labelanchor="nw", font=("Arial", "12"))
 top_srv_label.grid(row=1, column=0, columnspan=5, sticky="w", padx=20, pady=15)
 
-s_top_srv_flip = tk.Scale(top_srv_label, label="PWM flip", font=('arial','11'), orient='horizontal',
-                               length=190, from_=45, to_=60, command=servo_flip)
+s_top_srv_flip = tk.Scale(top_srv_label, label="Angle Flip", font=('arial','11'), orient='horizontal',
+                               length=190, from_=60, to_=140, command=servo_flip)
 s_top_srv_flip.grid(row=2, column=0, sticky="w", padx=12, pady=5)
 s_top_srv_flip.set(robot_settings["TOP_COVER"]["ANGLE"]["FLIP"])
 
 
-s_top_srv_open = tk.Scale(top_srv_label, label="PWM open", font=('arial','11'), orient='horizontal',
-                               length=190, from_=60, to_=75, command=servo_open)
+s_top_srv_open = tk.Scale(top_srv_label, label="Angle Open", font=('arial','11'), orient='horizontal',
+                               length=190, from_=100, to_=140, command=servo_open)
 s_top_srv_open.grid(row=2, column=1, sticky="w", padx=12, pady=5)
 s_top_srv_open.set(robot_settings["TOP_COVER"]["ANGLE"]["OPEN"])
 
 
-s_top_srv_close = tk.Scale(top_srv_label, label="PWM close", font=('arial','11'), orient='horizontal',
-                              length=190, from_=65, to_=90, command=servo_close)
+s_top_srv_close = tk.Scale(top_srv_label, label="Angle Close", font=('arial','11'), orient='horizontal',
+                              length=190, from_=140, to_=180, command=servo_close)
 s_top_srv_close.grid(row=2, column=2, sticky="w", padx=12, pady=5)
 s_top_srv_close.set(robot_settings["TOP_COVER"]["ANGLE"]["CLOSE"])
 
 
-s_top_srv_release = tk.Scale(top_srv_label, label="PWM release from close", font=('arial','11'), orient='horizontal',
+s_top_srv_release = tk.Scale(top_srv_label, label="Angle release from close", font=('arial','11'), orient='horizontal',
                               length=190, from_=0, to_=5, command=servo_release)
 s_top_srv_release.grid(row=2, column=3, sticky="w", padx=12, pady=5)
 s_top_srv_release.set(robot_settings["TOP_COVER"]["ANGLE"]["RELEASE"])
@@ -1790,21 +1760,21 @@ close_btn.grid(row=3, column=2, sticky="w", padx=15, pady=10)
 
 
 s_top_srv_flip_to_close_time = tk.Scale(top_srv_label, label="TIME: flip > close (ms)", font=('arial','11'),
-                                        orient='horizontal', length=190, from_=200, to_=1000,
+                                        orient='horizontal', length=190, from_=100, to_=1000,
                                         resolution=50, command=flip_to_close_time)
 s_top_srv_flip_to_close_time.grid(row=4, column=0, sticky="w", padx=12, pady=5)
 s_top_srv_flip_to_close_time.set(robot_settings["TOP_COVER"]["TIME"]["FLIP_TO_CLOSE"])
 
 
 s_top_srv_close_to_flip_time = tk.Scale(top_srv_label, label="TIME: close > flip (ms)", font=('arial','11'),
-                                        orient='horizontal', length=190, from_=200, to_=1000,
+                                        orient='horizontal', length=190, from_=100, to_=1000,
                                         resolution=50, command=close_to_flip_time)
 s_top_srv_close_to_flip_time.grid(row=4, column=1, sticky="w", padx=12, pady=5)
 s_top_srv_close_to_flip_time.set(robot_settings["TOP_COVER"]["TIME"]["CLOSE_TO_FLIP"])
 
 
 s_top_srv_flip_open_time = tk.Scale(top_srv_label, label="TIME: flip <> open (ms)", font=('arial','11'),
-                                    orient='horizontal', length=190, from_=200, to_=1000,
+                                    orient='horizontal', length=190, from_=100, to_=1000,
                                     resolution=50, command=flip_open_time)
 s_top_srv_flip_open_time.grid(row=4, column=2, sticky="w", padx=10, pady=5)
 s_top_srv_flip_open_time.set(robot_settings["TOP_COVER"]["TIME"]["FLIP_OPEN"])
@@ -1826,32 +1796,32 @@ b_srv_label = tk.LabelFrame(settingWindow, text="Cube holder - servo settings",
 b_srv_label.grid(row=5, column=0, columnspan=5, sticky="w", padx=20, pady=10)
 
 
-s_btm_srv_CCW = tk.Scale(b_srv_label, label="PWM CCW", font=('arial','11'), orient='horizontal',
-                              length=190, from_=40, to_=62, command=servo_CCW)
+s_btm_srv_CCW = tk.Scale(b_srv_label, label="Angle CCW", font=('arial','11'), orient='horizontal',
+                              length=190, from_=90, to_=180, command=servo_CCW)
 s_btm_srv_CCW.grid(row=6, column=0, sticky="w", padx=13, pady=5)
 s_btm_srv_CCW.set(robot_settings["CUBE_HOLDER"]["ANGLE"]["CCW"])
 
 
-s_btm_srv_home = tk.Scale(b_srv_label, label="PWM home", font=('arial','11'), orient='horizontal',
-                               length=190, from_=63, to_=87, command=servo_home)
+s_btm_srv_home = tk.Scale(b_srv_label, label="Angle home", font=('arial','11'), orient='horizontal',
+                               length=190, from_=45, to_=135, command=servo_home)
 s_btm_srv_home.grid(row=6, column=1, sticky="w", padx=12, pady=5)
 s_btm_srv_home.set(robot_settings["CUBE_HOLDER"]["ANGLE"]["HOME"])
 
 
-s_btm_srv_CW = tk.Scale(b_srv_label, label="PWM CW", font=('arial','11'), orient='horizontal',
-                               length=190, from_=88, to_=110, command=servo_CW)
+s_btm_srv_CW = tk.Scale(b_srv_label, label="Angle CW", font=('arial','11'), orient='horizontal',
+                               length=190, from_=0, to_=90, command=servo_CW)
 s_btm_srv_CW.grid(row=6, column=2, sticky="w", padx=12, pady=5)
 s_btm_srv_CW.set(robot_settings["CUBE_HOLDER"]["ANGLE"]["CW"])
 
 
-s_btm_srv_extra_sides = tk.Scale(b_srv_label, label="PWM release CW/CCW", font=('arial','11'), orient='horizontal',
-                               length=190, from_=0, to_=6, command=servo_extra_sides)
+s_btm_srv_extra_sides = tk.Scale(b_srv_label, label="Angle release CW/CCW", font=('arial','11'), orient='horizontal',
+                               length=190, from_=0, to_=10, command=servo_extra_sides)
 s_btm_srv_extra_sides.grid(row=6, column=3, sticky="w", padx=12, pady=5)
 s_btm_srv_extra_sides.set(robot_settings["CUBE_HOLDER"]["ANGLE"]["EXTRA_CCW"])
 
 
-s_btm_srv_extra_home = tk.Scale(b_srv_label, label="PWM release at home", font=('arial','11'), orient='horizontal',
-                               length=190, from_=0, to_=6, command=robot_settings["CUBE_HOLDER"]["ANGLE"]["EXTRA_HOME"])
+s_btm_srv_extra_home = tk.Scale(b_srv_label, label="Angle release at home", font=('arial','11'), orient='horizontal',
+                               length=190, from_=0, to_=10, command=robot_settings["CUBE_HOLDER"]["ANGLE"]["EXTRA_HOME"])
 s_btm_srv_extra_home.grid(row=6, column=4, sticky="w", padx=12, pady=5)
 s_btm_srv_extra_home.set(robot_settings["CUBE_HOLDER"]["ANGLE"]["EXTRA_HOME"])
 
@@ -1872,19 +1842,19 @@ CW_btn.grid(row=7, column=2, sticky="w", padx=15, pady=10)
 
 
 s_btm_srv_spin_time = tk.Scale(b_srv_label, label="TIME: spin (ms)", font=('arial','11'), orient='horizontal',
-                               length=190, from_=300, to_=1000,  resolution=50, command=robot_settings["CUBE_HOLDER"]["TIME"]["SPIN"])
+                               length=190, from_=100, to_=1000,  resolution=50, command=servo_spin_time)
 s_btm_srv_spin_time.grid(row=8, column=0, sticky="w", padx=12, pady=5)
 s_btm_srv_spin_time.set(robot_settings["CUBE_HOLDER"]["TIME"]["SPIN"])
 
 
 s_btm_srv_rotate_time = tk.Scale(b_srv_label, label="TIME: rotate (ms)", font=('arial','11'), orient='horizontal',
-                               length=190, from_=300, to_=1000,  resolution=50, command=robot_settings["CUBE_HOLDER"]["TIME"]["ROTATE"])
+                               length=190, from_=100, to_=1000,  resolution=50, command=servo_rotate_time)
 s_btm_srv_rotate_time.grid(row=8, column=1, sticky="w", padx=12, pady=5)
 s_btm_srv_rotate_time.set(robot_settings["CUBE_HOLDER"]["TIME"]["ROTATE"])
 
 
 s_btm_srv_rel_time = tk.Scale(b_srv_label, label="TIME: release (ms)", font=('arial','11'), orient='horizontal',
-                               length=190, from_=0, to_=400,  resolution=50, command=robot_settings["CUBE_HOLDER"]["TIME"]["RELEASE"])
+                               length=190, from_=0, to_=400,  resolution=50, command=servo_release_time)
 s_btm_srv_rel_time.grid(row=8, column=2, sticky="w", padx=12, pady=5)
 s_btm_srv_rel_time.set(robot_settings["CUBE_HOLDER"]["TIME"]["RELEASE"])
 
