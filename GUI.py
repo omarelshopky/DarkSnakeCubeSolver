@@ -25,6 +25,9 @@
 # ################################## Imports  ##########################################################################
 
 # custom libraries
+from tabnanny import check
+
+from numpy import isposinf
 import colors_recognition as cam        # recognize cube status via a webcam (by Andrea Favero)
 import Cubotino_moves as cm          # translate a cube solution into CUBOTino robot moves (by Andrea Favero)
 import twophase.solver as sv                  # Kociemba solver library (by Hergbert Kociemba)
@@ -39,6 +42,7 @@ import datetime as dt                # date and time library used as timestamp o
 import threading                     # threading library, to parallelize uart data 
 import time                          # 
 import json                          # Serialize and Deserialize json objects
+import requests                      # HTTP requests library to communicate with nodeMCU
 import os                            # os is imported to ensure the file presence, check/make
 
 # python library, to be installed (pyserial)
@@ -1072,10 +1076,10 @@ def log_data():
     if not os.path.exists(folder):                   # if case the folder does not exist
         os.makedirs(folder)                          # folder is made if it doesn't exist
 
-    fname = folder+'\Cubotino_log.txt'         # folder+filename
+    fname = folder+'\darksnake_log.txt'         # folder+filename
     
     if not os.path.exists(fname):              # case the file does not exist (file with headers is generated)
-        print(f'\ngenerated Cubotino_log.txt file with headers')
+        print(f'\ngenerated \darksnake_log.txt file with headers')
         
         # columns headers
         headers = ['Date', 'CubeStatusEnteringMethod', 'CubeStatus', 'CubeSolution',
@@ -1108,7 +1112,7 @@ def log_data():
     s = a+'\t'+b+'\t'+c+'\t'+d+'\t'+e+'\t'+f+'\t'+g+'\t'+h+'\n'  # tab separated string with all the info to log
 
     # 'a'means the file will be generated if it does not exist, and data will be appended at the end
-    fname = folder+'\Cubotino_log.txt'           # folder+filename
+    fname = folder+'\darksnake_log.txt'           # folder+filename
     with open(fname,'a') as f:                   # the text file is opened in edit mode  
         f.write(s)                               # data is appended   
 
@@ -1124,9 +1128,9 @@ https://www.youtube.com/watch?v=x_5VbOOskw0 """
 
 
 def connect_check(args):
-    """Function that activates the Connect button only when a serial port has been selected on the drop down menu."""
+    """Function that activates the Connect button only when an IP has been selected on the drop down menu."""
     
-    if "-" in clicked_com.get():         # case no serial port selected
+    if "-" in clicked_ip.get():          # case no IP selected
         b_connect["state"] = "disable"   # Connect button is disabled
     else:                                # case a serial port selected
         b_connect["state"] = "active"    # Connect button is activated
@@ -1136,28 +1140,47 @@ def connect_check(args):
 
 
 
-def update_coms():
-    """Function that updates the serial ports connected to the PC."""
+def update_ips():
+    """Function that updates the up running IPs connected to the current network."""
     
-    global clicked_com, b_drop_COM
+    global clicked_ip, b_drop_ip, ips
     
-    ports = serial.tools.list_ports.comports()      # all com ports are retrieved
-    coms = [com[0] for com in ports]                # list of the serial ports
-    coms.insert(0, "-")                             # first position on drop down menu is not a serial port
+    ips = []
+    threads = []
+
+    for i in range(4):                             # Use 4 threads in checking up running host process to speed up
+        threads.append(threading.Thread(target=check_ip_range, args=(64 * i, 64 * (i+1)))) 
+        threads[i].start()
+
+    for i in range(4):                             # Wait until the four threads finish
+        threads[i].join()
+
+    ips.insert(0, "-")                             # first position on drop down menu is not a serial port
     try:
-        b_drop_COM.destroy()                        # previous drop down menu is destroyed
+        b_drop_ip.destroy()                        # previous drop down menu is destroyed
     except:
         pass
-    clicked_com = tk.StringVar()                    # string variable used by tkinter for the selection
-    clicked_com.set(coms[0])                        # activates first drop down menu position (not a serial port)
-    b_drop_COM = tk.OptionMenu(gui_robot_label, clicked_com, *coms, command=connect_check) # populated drop down menu
-    b_drop_COM.config(width=7, font=("Arial", "10"))        # drop down menu settings
-    b_drop_COM.grid(column=0, row=8, sticky="e", padx=10)   # drop down menu settings
+    clicked_ip = tk.StringVar()                    # string variable used by tkinter for the selection
+    clicked_ip.set(ips[0])                        # activates first drop down menu position (not a serial port)
+    b_drop_ip = tk.OptionMenu(gui_robot_label, clicked_ip, *ips, command=connect_check) # populated drop down menu
+    b_drop_ip.config(width=11, font=("Arial", "10"))        # drop down menu settings
+    b_drop_ip.grid(column=0, row=8, sticky="e", padx=10)    # drop down menu settings
     connect_check(0)                                        # updates the button Connect status
     gui_robot_btn_update()                                  # updates the cube related buttons status
 
 
+def check_ip_range(start, end):
+    """Function to check NodeMCU hosts up running in specific ip range."""
+    global ips
 
+    for octet in range(start, end):
+        try:
+            r = requests.post(f"http://192.168.1.{octet}/checkConnection", timeout=0.07)
+
+            if r.status_code == 200:
+                ips.append(f"192.168.1.{octet}")
+        except:
+            pass
 
 
 
@@ -1179,7 +1202,7 @@ def connection():
             pass
         b_connect["text"] = "Connect"               # conection button label is changed to Connect
         b_refresh["state"] = "active"               # refresch com button is activated
-        b_drop_COM["state"] = "active"              # drop down menu for ports is activated
+        b_drop_ip["state"] = "active"              # drop down menu for ports is activated
         b_settings["state"] = "disable"             # settings button is disabled
         gui_robot_btn_update()                      # updates the cube related buttons status
 
@@ -1192,9 +1215,9 @@ def connection():
         gui_robot_btn_update()                      # updates the cube related buttons status
         b_connect["text"] = "Disconnect"            # conection button label is changed to Disconnect
         b_refresh["state"] = "disable"              # refresch com button is disables
-        b_drop_COM["state"] = "disable"             # drop down menu for ports is disabled
-        port = clicked_com.get()                    # serial port is retrieved from the selection made on drop down menu
-        print(f"selected port: {port}")             # feedback print to the terminal
+        b_drop_ip["state"] = "disable"             # drop down menu for ports is disabled
+        port = clicked_ip.get()                    # serial port is retrieved from the selection made on drop down menu
+        print(f"selected ip: {port}")             # feedback print to the terminal
         
         try:                                        # serial port opening
             ser = serial.Serial(port,
@@ -1219,7 +1242,7 @@ def connection():
             serialData = False                               # boolean enabling serial comm data analysis is set True
             b_connect["text"] = "Connect"                    # conection button label is changed to Connect
             b_refresh["state"] = "active"                    # refresch com button is activated
-            b_drop_COM["state"] = "active"                   # drop down menu for ports is activated
+            b_drop_ip["state"] = "active"                   # drop down menu for ports is activated
             gui_robot_btn_update()                           # updates the cube related buttons status
             
             return
@@ -1367,52 +1390,52 @@ def close_window():
 # ################################### functions to get the slider values  ##############################################
 
 def servo_CCW(val):
-    b_servo_CCW = int(val)     # bottom servo position when fully CW
+    robot_settings["CUBE_HOLDER"]["ANGLE"]["CCW"] = int(val)     # bottom servo position when fully CCW
 
 def servo_home(val):
-    b_home = int(val)          # bottom servo home position
+    robot_settings["CUBE_HOLDER"]["ANGLE"]["HOME"] = int(val)          # bottom servo home position
 
 def servo_CW(val):
-    b_servo_CW = int(val)      # bottom servo position when fully CCW
+    robot_settings["CUBE_HOLDER"]["ANGLE"]["CW"] = int(val)      # bottom servo position when fully CCW
     
 def servo_extra_sides(val):
-    b_extra_sides = int(val)   # bottom servo position small rotation back from CW and CCW, to release tension
+    robot_settings["CUBE_HOLDER"]["ANGLE"]["EXTRA_CCW"] = int(val)   # bottom servo position small rotation back from CW and CCW, to release tension
     
 def servo_extra_home(val):
-    b_extra_home = int(val)    # bottom servo position extra rotation at home, to releasetension
+    robot_settings["CUBE_HOLDER"]["ANGLE"]["EXTRA_HOME"] = int(val)    # bottom servo position extra rotation at home, to releasetension
 
 def servo_rotate_time(val):
-    b_rotate_time = int(val)   # time needed to the bottom servo to rotate about 90deg
+    robot_settings["CUBE_HOLDER"]["TIME"]["ROTATE"] = int(val)   # time needed to the bottom servo to rotate about 90deg
 
 def servo_rotate_time(val):
-    b_rel_time = int(val)      # time to rotate slightly back, to release tensions
+    robot_settings["CUBE_HOLDER"]["TIME"]["RELEASE"] = int(val)      # time to rotate slightly back, to release tensions
 
 def servo_spin_time(val):
-    b_spin_time = int(val)     # time needed to the bottom servo to spin about 90deg
+    robot_settings["CUBE_HOLDER"]["TIME"]["SPIN"] = int(val)     # time needed to the bottom servo to spin about 90deg
 
 def servo_flip(val):
-    t_servo_flip = int(val)    # top servo pos to flip the cube on one of its horizontal axis
+    robot_settings["TOP_COVER"]["ANGLE"]["FLIP"] = int(val)    # top servo pos to flip the cube on one of its horizontal axis
 
 def servo_open(val):
-    t_servo_open = int(val)    # top servo pos to free up the top cover from the cube
+    robot_settings["TOP_COVER"]["ANGLE"]["OPEN"] = int(val)    # top servo pos to free up the top cover from the cube
 
 def servo_close(val):
-    t_servo_close = int(val)   # top servo pos to constrain the top cover on cube mid and top layer
+    robot_settings["TOP_COVER"]["ANGLE"]["CLOSE"] = int(val)   # top servo pos to constrain the top cover on cube mid and top layer
 
 def servo_release(val):
-    t_servo_release = int(val)       # top servo release position after closing toward the cube
+    robot_settings["TOP_COVER"]["ANGLE"]["RELEASE"] = int(val)       # top servo release position after closing toward the cube
 
 def flip_to_close_time(val):
-    t_flip_to_close_time = int(val)  # time to lower the cover/flipper from flip to close position
+    robot_settings["TOP_COVER"]["TIME"]["FLIP_TO_CLOSE"] = int(val)  # time to lower the cover/flipper from flip to close position
 
 def close_to_flip_time(val):
-    t_close_to_flip_time = int(val)  # time to raise the cover/flipper from close to flip position
+    robot_settings["TOP_COVER"]["TIME"]["CLOSE_TO_FLIP"] = int(val)  # time to raise the cover/flipper from close to flip position
 
 def flip_open_time(val):
-    t_flip_open_time = int(val)      # time to raise/lower the flipper between open and flip positions
+    robot_settings["TOP_COVER"]["TIME"]["FLIP_OPEN"] = int(val)      # time to raise/lower the flipper between open and flip positions
 
 def open_close_time(val):
-    t_open_close_time = int(val)     # time to raise/lower the flipper between open and close positions
+    robot_settings["TOP_COVER"]["TIME"]["OPEN_CLOSE"] = int(val)     # time to raise/lower the flipper between open and close positions
 
 
 
@@ -1462,30 +1485,17 @@ def cw():
 
 # ############################ functions to get/send servos settings by/to the robot #################################
 
-def cubotino_settings_AF():
-    """Function to upload the servos settings used on my own CUBOTino, just as refernce.
-    These settings cannot be overwritten via the GUI, therefore a reliable reference over time."""
+def save_robot_settings():
+    """Function to save the servos settings to the json file."""
     
     try:  
-        with open("Cubotino_settings_AF.txt", "r") as f:  # servo settings text file is opened in read mode
-            data = f.readline()                           # data is on first line
-            data = data.replace(' ','')                   # empty spaces are removed
-            if '(' in data and ')' in data:               # case the dat contains open and close parenthesis
-                data_start = data.find('(')               # position of open parenthesys in data
-                data_end = data.find(')')                 # position of close parenthesys in data
-                print(f'\noriginal AF servos settings, as reference: {data[data_start:data_end+1]}')
-                data = data[data_start+1:data_end]     # data in between parenthesys is assigned, to same string variable
-                data_list=data.split(',')              # data is split by comma, becoming a list of strings 
+        with open(ROBOT_SETTINGS_FILE, 'w') as f:
+            json.dump(robot_settings, f)
 
-                settings=[]                            # empty list to store the list of numerical settings
-                for setting in data_list:              # iteration over the list of strings
-                    settings.append(int(setting))      # string setting is changed to integer and appended to the list
-                get_settings(settings)
-
-        gui_sliders_update('update_sliders')           # sliders positions are updated
+        # gui_sliders_update('update_sliders')           # sliders positions are updated
 
     except:
-        print("Something is wrong with Cubotino_settings_AF.txt file")
+        print(f"Something is wrong with {ROBOT_SETTINGS_FILE} file")
 
 
 
@@ -1679,7 +1689,7 @@ b_robot = tk.Button(gui_robot_label, text="Robot", command=robot_solver, height=
 b_robot.configure(font=("Arial", "12"), relief="sunken", state="disable")
 b_robot.grid(column=1, row=7, sticky="w", rowspan=3, padx=10, pady=5)
 
-b_refresh = tk.Button(gui_robot_label, text="Refresh COM", height=1, width=12, command=update_coms)
+b_refresh = tk.Button(gui_robot_label, text="Refresh IPs", height=1, width=12, command= lambda: threading.Thread(target=update_ips).start())
 b_refresh.configure(font=("Arial", "11"))
 b_refresh.grid(column=0, row=7, sticky="w", padx=10, pady=5) 
 
@@ -1730,8 +1740,8 @@ b_send_settings.configure(font=("Arial", "11"))
 b_send_settings.grid(row=0, column=1, sticky="w", padx=20, pady=10)
 
 
-b_get_AF_settings = tk.Button(settingWindow, text="get AF settings", height=1, width=15,
-                           state="active", command= cubotino_settings_AF)
+b_get_AF_settings = tk.Button(settingWindow, text="Save Robot Settings", height=1, width=15,
+                           state="active", command=save_robot_settings)
 b_get_AF_settings.configure(font=("Arial", "11"))
 b_get_AF_settings.grid(row=0, column=4, sticky="w", padx=20, pady=10)
 
@@ -1934,11 +1944,11 @@ save_cam_num_btn.grid(row=10, column=8, sticky="w", padx=10, pady=10)
 
 # ############################### general GUI  #########################################################################
 
-create_facelet_rects(width)                       # calls the function to generate the cube sketch
-create_colorpick(width)                           # calls the function to generate the color-picking palette
-update_coms()                                     # calls the function to generate the cube sketch
-root.protocol("WM_DELETE_WINDOW", close_window)   # the function close_function is called when the windows is closed
-root.mainloop()                                   # tkinter main loop
+create_facelet_rects(width)                                 # calls the function to generate the cube sketch
+create_colorpick(width)                                     # calls the function to generate the color-picking palette
+threading.Thread(target=update_ips).start()    # calls the function to generate the cube sketch
+root.protocol("WM_DELETE_WINDOW", close_window)             # the function close_function is called when the windows is closed
+root.mainloop()                                             # tkinter main loop
 
 ########################################################################################################################
 
